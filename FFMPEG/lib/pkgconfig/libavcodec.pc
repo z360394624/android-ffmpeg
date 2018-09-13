@@ -1,0 +1,14 @@
+prefix=/Users/luciuszhang/development/workspaces/target/ffmpeg/optimized
+exec_prefix=${prefix}
+libdir=/Users/luciuszhang/development/workspaces/target/ffmpeg/optimized/lib
+includedir=/Users/luciuszhang/development/workspaces/target/ffmpeg/optimized/include
+
+Name: libavcodec
+Description: FFmpeg codec library
+Version: 58.18.100
+Requires: libavutil >= 56.14.100
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavcodec -pthread -lm
+Libs.private: 
+Cflags: -I${includedir}
