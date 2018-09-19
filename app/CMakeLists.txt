@@ -10,13 +10,13 @@ set(FFMPEG_DIR ${CMAKE_SOURCE_DIR}/../FFMPEG)
 
 
 add_library( # Sets the name of the library.
-             native-lib
+             ffmpeg-native
 
              # Sets the library as a shared library.
              SHARED
 
              # Provides a relative path to your source file(s).
-             src/main/cpp/native-lib.cpp )
+             src/main/cpp/ffmpeg-native.cpp )
 
 # Searches for a specified prebuilt library and stores the path as a
 # variable. Because CMake includes system libraries in the search path by
@@ -35,5 +35,10 @@ find_library( # Sets the name of the path variable.
 # can link multiple libraries, such as libraries you define in this
 # build script, prebuilt third-party libraries, or system libraries.
 
-target_include_directories(native-lib PRIVATE
+target_include_directories(ffmpeg-native PRIVATE
                            ${FFMPEG_DIR}/include)
+
+
+target_link_libraries(ffmpeg-native
+                      android
+                      log)

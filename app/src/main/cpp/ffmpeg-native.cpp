@@ -13,12 +13,25 @@ AVPacket enc_pkt;
 AVFrame *pFrameYUV;
 
 
-extern "C" JNIEXPORT jstring
+extern "C"
+JNIEXPORT jint JNICALL Java_com_integer_ffmpeg_nativeintf_FFmpegNative_initial
+        (JNIEnv *pEnv, jobject, jint width, jint height, jstring cache) {
 
-JNICALL
-Java_com_example_luciuszhang_androidffmpeg_MainActivity_stringFromJNI(
-        JNIEnv *env,
-        jobject /* this */) {
-    std::string hello = "Hello from C++";
-    return env->NewStringUTF(hello.c_str());
+    const char* _cache = NULL;
+
+    if (cache) {
+        _cache = pEnv -> GetStringUTFChars(cache, JNI_FALSE);
+    } else {
+        return -1;
+    }
+
+    LOGI("input: %d : %d, dir = %s", width, height, _cache);
+
+    if (_cache) {
+        pEnv -> ReleaseStringUTFChars(cache, _cache);
+    } else {
+        LOGW("cache release failed");
+    }
+
+    return 1;
 }
