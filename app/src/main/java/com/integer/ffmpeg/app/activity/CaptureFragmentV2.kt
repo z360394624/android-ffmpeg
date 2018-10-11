@@ -14,14 +14,18 @@ import android.os.HandlerThread
 import android.support.v4.app.ActivityCompat
 import android.support.v4.app.Fragment
 import android.support.v4.content.ContextCompat
+import android.text.TextUtils
 import android.util.Log
 import android.view.*
+import android.widget.ImageView
+import android.widget.TextView
 import com.example.android.camera2basic.CompareSizesByArea
 import com.example.android.camera2basic.ConfirationDialog
 import com.example.android.camera2basic.ErrorDialog
 import com.integer.ffmpeg.R
 import com.integer.ffmpeg.app.REQUEST_CAMERA_PERMISSION
 import com.integer.ffmpeg.app.view.AutoFitTextureView
+import com.integer.ffmpeg.nativeintf.FFmpegNative
 import kotlinx.android.synthetic.main.fragment_capture.*
 import java.util.*
 import java.util.concurrent.Semaphore
@@ -33,7 +37,7 @@ import java.util.concurrent.TimeUnit
  * @author luciuszhang
  * @date 2018/9/18 14:56
  */
-class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCallback {
+class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCallback, View.OnClickListener {
 
 
     companion object {
@@ -58,12 +62,23 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
     /** An additional thread for running tasks that shouldn't block the UI. */
     private var backgroundThread: HandlerThread? = null
 
+    private var recording: Boolean = false
+
     private var cameraDevice: CameraDevice? = null
     private var imageReader: ImageReader? = null
     private var captureSession: CameraCaptureSession? = null
     private lateinit var previewRequestBuilder: CaptureRequest.Builder
     private lateinit var previewRequest: CaptureRequest
+
+    private lateinit var ffmpegNative: FFmpegNative
+
+    private var recordCaptureSession: CameraCaptureSession? = null
+    private lateinit var recordRequestBuilder: CaptureRequest.Builder
+    private lateinit var recordRequest: CaptureRequest
+
     private lateinit var previewTextureView: AutoFitTextureView
+    private lateinit var mainStartRecordView: ImageView
+    private lateinit var mainSwitchCameraTextView: TextView
 
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View?  =
@@ -72,6 +87,12 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         previewTextureView = main_texture_view
+        mainStartRecordView = iv_main_start_record
+        mainSwitchCameraTextView = tv_main_switch_camera
+
+        mainSwitchCameraTextView.setOnClickListener(this)
+        mainStartRecordView.setOnClickListener(this)
+        mainStartRecordView.isSelected = recording
     }
 
     override fun onResume() {
@@ -79,7 +100,6 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
         if (!requestPermission()) return
         prepareThread()
         detectionCamera()
-        calculateCameraParameters()
         if (previewTextureView.isAvailable) {
             openCamera(previewTextureView.width, previewTextureView.height)
         } else {
@@ -103,6 +123,15 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
             super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         }
     }
+
+    override fun onClick(v: View?) {
+       if (v == mainStartRecordView) {
+           switchRecord()
+       } else if (v == mainSwitchCameraTextView) {
+           switchCamera()
+       }
+    }
+
 
     /** 准备工作线程 */
     private fun prepareThread() {
@@ -147,7 +176,6 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
 
     /** 根据当前摄像头计算所需参数 */
     private fun calculateCameraParameters() {
-        Log.d(TAG, "calculateCameraParameters===============")
         val context = activity
         if (context != null) {
             Log.d(TAG, "setOnImageAvailableListener")
@@ -202,6 +230,7 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
     @SuppressLint("MissingPermission")
     private fun openCamera(width: Int, height: Int) {
         Log.d(TAG, "open camera ===========================")
+        calculateCameraParameters()
         val manager = activity?.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         try {
             // Wait for camera to open - 2.5 seconds is sufficient
@@ -222,6 +251,7 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
             Log.d(TAG, "deviceStateCallback onOpened ===========================cameraDevice = $cameraDevice")
             this@CaptureFragmentV2.cameraDevice = cameraDevice
             createCameraPreviewSession()
+            initFFmpeg()
         }
         override fun onDisconnected(cameraDevice: CameraDevice) {
             cameraOpenCloseLock.release()
@@ -311,8 +341,39 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
 
     }
 
-    private val captureCallback = object : CameraCaptureSession.CaptureCallback() {
-        private fun process(result: CaptureResult) {}
+    /** 初始化编码器 */
+    private fun initFFmpeg() {
+        Log.d(TAG, "initFFmpeg")
+        ffmpegNative = FFmpegNative()
+        ffmpegNative.initial(previewTextureView.width, previewTextureView.height, "")
+    }
+
+    /** 切换摄像头 */
+    private fun switchCamera() {
+
+        closeCamera()
+        currentCameraId = if (cameraIds.indexOf(currentCameraId) == 0) {
+            cameraIds[1]
+        } else {
+            cameraIds[0]
+        }
+        if (previewTextureView.isAvailable) {
+            openCamera(previewTextureView.width, previewTextureView.height)
+        } else {
+            previewTextureView.surfaceTextureListener = surfaceTextureListener
+        }
+    }
+
+    /** 开始停止摄像 */
+    private fun switchRecord() {
+        if (recording) {
+            recording = false
+            Log.d(TAG, "stop recording")
+        } else {
+            recording = true
+            Log.d(TAG, "start recording")
+        }
+        mainStartRecordView.isSelected = recording
     }
 
 

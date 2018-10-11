@@ -15,9 +15,12 @@ android {
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
         externalNativeBuild {
             cmake {
-                cppFlags "-std=c++11"
-                abiFilters "armeabi-v7a"
+                cppFlags "-std=c++11 -frtti -fexceptions -lz"
+                abiFilters "armeabi"
             }
+        }
+        ndk {
+            abiFilters "armeabi"
         }
     }
     buildTypes {
@@ -29,6 +32,7 @@ android {
     sourceSets {
         main {
             // let gradle pack the shared library into apk
+
             jniLibs.srcDirs = ['../FFMPEG/lib']
         }
     }
