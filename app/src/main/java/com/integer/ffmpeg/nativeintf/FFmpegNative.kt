@@ -31,7 +31,8 @@ class FFmpegNative {
 
         // Used to load the 'native-lib' library on application startup.
         init {
-//            System.loadLibrary("ffmpeg")
+            System.loadLibrary("ffmpeg")
+//            System.loadLibrary("x264")
             System.loadLibrary("ffmpeg-native")
         }
     }

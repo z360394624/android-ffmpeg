@@ -27,7 +27,7 @@ void a_log(void *ptr, int level, const char* fmt, va_list v1) {
 }
 
 
-//extern "C"
+extern "C"
 JNIEXPORT jint JNICALL Java_com_integer_ffmpeg_nativeintf_FFmpegNative_initial
         (JNIEnv *pEnv, jobject, jint width, jint height, jstring cache) {
 

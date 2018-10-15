@@ -33,7 +33,7 @@ android {
         main {
             // let gradle pack the shared library into apk
 
-            jniLibs.srcDirs = ['../FFMPEG/lib']
+            jniLibs.srcDirs = ['../FFMPEG/ffmpeg/lib', '../FFMPEG/x264/lib']
         }
     }
     externalNativeBuild {

@@ -29,6 +29,29 @@ MESSAGE(STATUS "====================FFMEGP DIR " ${FFMPEG_DIR})
 MESSAGE(STATUS "====================CMAKE_SOURCE_DIR DIR " ${CMAKE_SOURCE_DIR})
 MESSAGE(STATUS "====================CPU MODEL " ${ANDROID_ABI})
 
+
+
+# Specifies libraries CMake should link to your target library. You
+# can link multiple libraries, such as libraries you define in this
+# build script, prebuilt third-party libraries, or system libraries.
+
+# 链接三方头文件
+target_include_directories(ffmpeg-native PRIVATE
+                           ${FFMPEG_DIR}/ffmpeg/include
+                           ${FFMPEG_DIR}/x264/include)
+
+
+# 创建ffmpeg动态库引用so
+add_library(ffmpeg SHARED IMPORTED)
+set_target_properties(ffmpeg PROPERTIES IMPORTED_LOCATION
+    ${FFMPEG_DIR}/ffmpeg/lib/armeabi/libffmpeg.so)
+
+# 创建x264静态库引用a
+add_library(x264 STATIC IMPORTED)
+set_target_properties(x264 PROPERTIES IMPORTED_LOCATION
+    ${FFMPEG_DIR}/x264/lib/armeabi/libx264.a)
+
+
 find_library( # Sets the name of the path variable.
               log-lib
 
@@ -36,23 +59,9 @@ find_library( # Sets the name of the path variable.
               # you want CMake to locate.
               log)
 
-# Specifies libraries CMake should link to your target library. You
-# can link multiple libraries, such as libraries you define in this
-# build script, prebuilt third-party libraries, or system libraries.
-
-target_include_directories(ffmpeg-native PRIVATE
-                           ${FFMPEG_DIR}/include)
-
-
-
-add_library(ffmpeg SHARED IMPORTED)
-set_target_properties(ffmpeg PROPERTIES IMPORTED_LOCATION
-    ${FFMPEG_DIR}/lib/armeabi/libffmpeg.so)
-
-
-
 target_link_libraries(ffmpeg-native
                       ffmpeg
+                      x264
                       ${log-lib}
                       android)
 
