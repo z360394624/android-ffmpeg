@@ -58,6 +58,8 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
     private var backgroundThread: HandlerThread? = null
 
     private var recording: Boolean = false
+    /** 是否是关闭页面 */
+    private var closing: Boolean = false
 
     private var cameraDevice: CameraDevice? = null
     private var imageReader: ImageReader? = null
@@ -103,9 +105,12 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
     }
 
     override fun onPause() {
+        ffmpeg.close()
+        closing = true
         closeCamera()
         stopThread()
         super.onPause()
+
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
@@ -200,7 +205,7 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
 
     @SuppressLint("MissingPermission")
     private fun openCamera(width: Int, height: Int) {
-        Log.d(TAG, "open camera ===========================")
+        Log.d(TAG, "open camera")
         val manager = activity?.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         try {
             // Wait for camera to open - 2.5 seconds is sufficient
@@ -250,8 +255,7 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
 
     /** 初始化编码器 */
     private fun initFFmpeg() {
-        Log.d(TAG, "initFFmpeg")
-        ffmpeg.init(previewTextureView.width, previewTextureView.height)
+//        ffmpeg.init(previewTextureView.width, previewTextureView.height)
     }
 
     /** 切换摄像头 */
@@ -273,20 +277,18 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
     /** turn on/off recording */
     private fun switchRecord() {
         if (recording) {
-            Log.d(TAG, "stop recording")
             recording = false
             closeRecordSession()
-            createCameraPreviewSession()
         } else {
-            Log.d(TAG, "start recording")
             recording = true
-            createCameraRecordSession()
+            closePreviewSession()
         }
         mainStartRecordView.isSelected = recording
     }
 
-    /** close preview seesion */
+    /** close preview session */
     private fun closePreviewSession() {
+        previewCaptureSession?.stopRepeating()
         previewCaptureSession?.close()
         previewCaptureSession = null
     }
@@ -294,12 +296,11 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
 
     /** close recording session */
     private fun closeRecordSession() {
+        recordCaptureSession?.stopRepeating()
         recordCaptureSession?.close()
         recordCaptureSession = null
         imageReader?.close()
         imageReader = null
-
-        ffmpeg.close()
     }
 
     private fun closeCamera() {
@@ -332,7 +333,6 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
     private val deviceStateCallback = object : CameraDevice.StateCallback() {
         override fun onOpened(cameraDevice: CameraDevice) {
             cameraOpenCloseLock.release()
-            Log.d(TAG, "deviceStateCallback onOpened ===========================cameraDevice = $cameraDevice")
             this@CaptureFragmentV2.cameraDevice = cameraDevice
             /** create preview session */
             createCameraPreviewSession()
@@ -357,7 +357,6 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
 
         /** camera session configured, create preview request */
         override fun onConfigured(session: CameraCaptureSession?) {
-            Log.d(TAG, "onConfigured =========================== $cameraDevice")
             if (cameraDevice == null) {
                 return
             } else {
@@ -373,13 +372,21 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
                 previewRequest = previewRequestBuilder.build()
                 /** start preview */
                 previewCaptureSession?.setRepeatingRequest(previewRequest, null, backgroundHandler)
-
+                Log.d(TAG, "start preview")
             } catch (e: Exception) {
                 e?.printStackTrace()
             }
         }
 
         override fun onConfigureFailed(session: CameraCaptureSession?) {
+        }
+
+        override fun onClosed(session: CameraCaptureSession?) {
+            Log.d(TAG, "previewCaptureSession closed")
+            super.onClosed(session)
+            if (!closing) {
+                createCameraRecordSession()
+            }
         }
     }
 
@@ -389,7 +396,7 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
 
         /** camera session configured, create preview request */
         override fun onConfigured(session: CameraCaptureSession?) {
-            Log.d(TAG, "onConfigured =========================== $cameraDevice")
+
             if (cameraDevice == null) {
                 return
             } else {
@@ -405,6 +412,7 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
                 recordRequest = recordRequestBuilder.build()
                 /** start preview */
                 recordCaptureSession?.setRepeatingRequest(recordRequest, null, backgroundHandler)
+                Log.d(TAG, "start record")
 
             } catch (e: Exception) {
                 e?.printStackTrace()
@@ -412,6 +420,15 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
         }
 
         override fun onConfigureFailed(session: CameraCaptureSession?) {
+        }
+
+
+        override fun onClosed(session: CameraCaptureSession?) {
+            Log.d(TAG, "recordCaptureSession closed")
+            super.onClosed(session)
+            if (!closing) {
+                createCameraPreviewSession()
+            }
         }
     }
 
@@ -427,8 +444,7 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
                 val data = ByteArray(buffer.remaining())
                 buffer.get(data)
                 /** ffmpeg encode */
-                ffmpeg.encode(data)
-                ffmpeg.flush()
+//                ffmpeg.encode(data)
                 image.close()
             } else {
                 Log.d(TAG, "image is null")

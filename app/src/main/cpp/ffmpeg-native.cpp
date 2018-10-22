@@ -7,6 +7,7 @@
 
 
 AVFormatContext *ofmt_ctx;
+AVOutputFormat *fmt;
 AVStream* video_st;
 AVCodecContext* pCodecCtx;
 AVCodec* pCodec;
@@ -15,15 +16,18 @@ AVFrame *pFrameYUV;
 
 
 int framecnt = 0;
-int yuv_width;
-int yuv_height;
 int y_length;
 int uv_length;
 int64_t start_time;
+int pts = 0;
 
 
 void a_log(void *ptr, int level, const char* fmt, va_list v1) {
-
+    char *log = (char*)malloc(strlen(fmt));
+    memcpy(log, fmt, strlen(fmt));
+    vsprintf(log, fmt, v1);
+    LOGE("LOG >>>>>>>>>>>>>>> level: %d fmt: %s\n", level, log);
+    free(log);
 }
 
 
@@ -39,15 +43,18 @@ JNIEXPORT jint JNICALL Java_com_integer_ffmpeg_nativeintf_FFmpegNative_initial
         return -1;
     }
 
+    y_length = width * height;
+    uv_length = width * height / 4;
+
     av_log_set_callback(a_log);
 
     /** 注册所有复用，解复用器，注册协议 */
     av_register_all();
 
-    /** 初始化输出类型和格式 */
-    avformat_alloc_output_context2(&ofmt_ctx, NULL, "flv", _cache);
+    /** init output file type */
+    avformat_alloc_output_context2(&ofmt_ctx, fmt, "mp4", _cache);
 
-    /** 初始化编码格式 */
+    /** fine & init encoder */
     pCodec = avcodec_find_encoder(AV_CODEC_ID_H264);
 
     if (!pCodec) {
@@ -82,14 +89,16 @@ JNIEXPORT jint JNICALL Java_com_integer_ffmpeg_nativeintf_FFmpegNative_initial
     pCodecCtx->max_b_frames = 3;
 
     AVDictionary *param = 0;
-    av_dict_set(&param, "preset", "ultrafast", 0);
+    av_dict_set(&param, "preset", "slow", 0);
     av_dict_set(&param, "tune", "zerolatency", 0);
 
+    /** open encoder */
     if (avcodec_open2(pCodecCtx, pCodec, &param) < 0) {
         LOGE("Failed to open encoder!\n");
         return -1;
     }
 
+    /** create output stream */
     video_st = avformat_new_stream(ofmt_ctx, pCodec);
 
     if (video_st == NULL) {
@@ -100,11 +109,13 @@ JNIEXPORT jint JNICALL Java_com_integer_ffmpeg_nativeintf_FFmpegNative_initial
     video_st->time_base.den = 30;
     video_st->codec = pCodecCtx;
 
+    /** open output file */
     if (avio_open(&ofmt_ctx->pb, _cache, AVIO_FLAG_READ_WRITE) < 0) {
         LOGE("Failed to open output file!\n");
         return -1;
     }
 
+    /** set output file header */
     avformat_write_header(ofmt_ctx, NULL);
 
     start_time = av_gettime();
@@ -122,33 +133,49 @@ JNIEXPORT jint JNICALL Java_com_integer_ffmpeg_nativeintf_FFmpegNative_initial
 
 //extern "C"
 JNIEXPORT jint JNICALL Java_com_integer_ffmpeg_nativeintf_FFmpegNative_encode
-        (JNIEnv *env, jobject obj, jbyteArray yuv) {
+        (JNIEnv *env, jobject, jbyteArray yuv) {
 
-
+    LOGE("start encode\n");
     int ret;
     int enc_got_frame = 0;
-    int i = 0;
+
+    /** allow mem */
     pFrameYUV = av_frame_alloc();
-    uint8_t *out_buffer = (uint8_t *)av_malloc(avpicture_get_size(AV_PIX_FMT_YUV420P, pCodecCtx->width, pCodecCtx->height));
+    /** YUV数据格式 */
+    int y_size = pCodecCtx->width * pCodecCtx->height;
+    int size = avpicture_get_size(AV_PIX_FMT_YUV420P, pCodecCtx->width, pCodecCtx->height);
+    uint8_t *out_buffer = (uint8_t *)av_malloc(size);
     avpicture_fill((AVPicture*)pFrameYUV, out_buffer, AV_PIX_FMT_YUV420P, pCodecCtx->width, pCodecCtx->height);
+    LOGE("avpicture_fill : width: %d, height: %d \n", pCodecCtx->width, pCodecCtx->height);
+    jbyte* in= (*env).GetByteArrayElements(yuv, JNI_FALSE);
 
-
-    jbyte* in= (*env).GetByteArrayElements(yuv,JNI_FALSE);
 
     memcpy(pFrameYUV->data[0], in, y_length);
-    for (int i = 0; i < uv_length; ++i) {
-        *(pFrameYUV->data[2]+i) = *(in+y_length*2);
-        *(pFrameYUV->data[1]+i) = *(in+y_length*2+1);
+
+    for (int i = 0; i < uv_length; i ++) {
+        *(pFrameYUV->data[2] + i) = *(in + y_length + i * 2);
+        *(pFrameYUV->data[1] + i) = *(in + y_length + i*2 + 1);
     }
 
+
+//    pFrameYUV->pts = pts;
+//    pts ++;
+
+
     pFrameYUV->format = AV_PIX_FMT_YUV420P;
-    pFrameYUV->width = yuv_width;
-    pFrameYUV->height = yuv_height;
+    pFrameYUV->width = pCodecCtx->width;
+    pFrameYUV->height = pCodecCtx->height;
 
     enc_pkt.data = NULL;
     enc_pkt.size = 0;
+
+    /** init AVPacket */
     av_init_packet(&enc_pkt);
+
+    /** encode AVFrame(YUV) data to AVPacket(mkv) */
     ret = avcodec_encode_video2(pCodecCtx, &enc_pkt, pFrameYUV, &enc_got_frame);
+
+    /** release  AVFrame*/
     av_frame_free(&pFrameYUV);
 
     if (enc_got_frame == 1) {
@@ -160,7 +187,7 @@ JNIEXPORT jint JNICALL Java_com_integer_ffmpeg_nativeintf_FFmpegNative_encode
         AVRational r_framerate1 = {60, 2};
         AVRational time_base_q = {1, AV_TIME_BASE};
 
-        int64_t calc_duration = (AV_TIME_BASE)*(1 / av_q2d(r_framerate1));
+        int64_t calc_duration = (double)(AV_TIME_BASE)*(1 / av_q2d(r_framerate1));
 
         enc_pkt.pts = av_rescale_q(framecnt*calc_duration, time_base_q, time_base);
         enc_pkt.dts = enc_pkt.pts;
@@ -173,7 +200,8 @@ JNIEXPORT jint JNICALL Java_com_integer_ffmpeg_nativeintf_FFmpegNative_encode
             av_usleep(pts_time - now_time);
         }
 
-        ret = av_interleaved_write_frame(ofmt_ctx, &enc_pkt);
+        ret = av_write_frame(ofmt_ctx, &enc_pkt);
+
         av_free_packet(&enc_pkt);
     }
 
@@ -190,19 +218,19 @@ JNIEXPORT jint JNICALL Java_com_integer_ffmpeg_nativeintf_FFmpegNative_flush
     int got_frame;
 
     AVPacket enc_pkt;
-
     const AVCodec *tmp = ofmt_ctx->streams[0]->codec->codec;
 
     if (!(tmp->capabilities & AV_CODEC_CAP_DELAY)) {
-
+        LOGI("AV_CODEC_CAP_DELAY\n");
+        return 0;
     }
-
+    int count = 0;
     while (1) {
         enc_pkt.data = NULL;
         enc_pkt.size = 0;
         av_init_packet(&enc_pkt);
         ret = avcodec_encode_video2(ofmt_ctx->streams[0]->codec, &enc_pkt, NULL, &got_frame);
-
+        av_frame_free(NULL);
         if (ret < 0) {
             break;
         }
@@ -211,6 +239,7 @@ JNIEXPORT jint JNICALL Java_com_integer_ffmpeg_nativeintf_FFmpegNative_flush
             break;
         }
 
+        count ++;
         LOGI("FLUSH Encoder: Success to encode 1 frame!\t size: %5d\n", enc_pkt.size);
 
 
@@ -223,27 +252,19 @@ JNIEXPORT jint JNICALL Java_com_integer_ffmpeg_nativeintf_FFmpegNative_flush
         enc_pkt.pts = av_rescale_q(framecnt*calc_duration, time_base_q, time_base);
         enc_pkt.dts = enc_pkt.pts;
         enc_pkt.duration = av_rescale_q(calc_duration, time_base_q, time_base);
-
-
         enc_pkt.pos = -1;
+
         framecnt++;
         ofmt_ctx->duration = enc_pkt.duration * framecnt;
 
-        ret = av_interleaved_write_frame(ofmt_ctx, &enc_pkt);
-
+        ret = av_write_frame(ofmt_ctx, &enc_pkt);
         if (ret < 0) {
             break;
         }
-
-        av_write_trailer(ofmt_ctx);
-
-        return 0;
-
     }
-
-
-
-
+    LOGI("count ===== %d\n", count);
+    av_write_trailer(ofmt_ctx);
+    return ret;
 }
 
 
@@ -254,8 +275,18 @@ JNIEXPORT jint JNICALL Java_com_integer_ffmpeg_nativeintf_FFmpegNative_close
     if (video_st) {
         avcodec_close(video_st->codec);
     }
-    avio_close(ofmt_ctx->pb);
-    avformat_free_context(ofmt_ctx);
+    if (ofmt_ctx) {
+        avio_close(ofmt_ctx->pb);
+//        avformat_free_context(ofmt_ctx);
+        for (int i=0; i<ofmt_ctx->nb_streams; i++)
+        {
+            av_freep(&ofmt_ctx->streams[i]->codec);
+            av_freep(&ofmt_ctx->streams[i]);
+        }
+        av_free(ofmt_ctx);
+        avformat_free_context(ofmt_ctx);
+    }
+
     return 0;
 }
 
