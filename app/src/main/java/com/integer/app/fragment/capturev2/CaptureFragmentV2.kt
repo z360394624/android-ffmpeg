@@ -1,4 +1,4 @@
-package com.integer.app.fragment
+package com.integer.app.fragment.capturev2
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -11,10 +11,12 @@ import android.media.ImageReader
 import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Message
 import android.support.v4.app.ActivityCompat
 import android.support.v4.app.Fragment
 import android.support.v4.content.ContextCompat
 import android.util.Log
+import android.util.Range
 import android.view.*
 import android.widget.ImageView
 import android.widget.TextView
@@ -41,6 +43,7 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
 
     companion object {
         private const val TAG = "CaptureFragmentV2"
+        private const val MSG_WHAT_ENCODE = 1000
         @JvmStatic fun newInstance(): CaptureFragmentV2 = CaptureFragmentV2()
     }
 
@@ -57,9 +60,14 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
     /** An additional thread for running tasks that shouldn't block the UI. */
     private var backgroundThread: HandlerThread? = null
 
+    private var encodeHandler: Handler? = null
+    private var encodeThread: HandlerThread? = null
+
     private var recording: Boolean = false
     /** 是否是关闭页面 */
     private var closing: Boolean = false
+    /** 待编码数据列表 */
+    private var dataList = mutableListOf<ByteArray>()
 
     private var cameraDevice: CameraDevice? = null
     private var imageReader: ImageReader? = null
@@ -136,6 +144,27 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
     private fun prepareThread() {
         backgroundThread = HandlerThread("CaptureV2").also { it.start() }
         backgroundHandler = Handler(backgroundThread?.looper)
+    }
+
+
+    /** 开启解码线程 */
+    private fun startEncodeThread() {
+        encodeThread = HandlerThread("EncodeThread").also { it.start() }
+        encodeHandler = object: Handler(encodeThread?.looper) {
+            override fun handleMessage(msg: Message?) {
+                when(msg?.what) {
+                    MSG_WHAT_ENCODE -> {
+                        Log.d(TAG, "encode yuv data")
+                        var yuvData = msg?.obj
+                        if (yuvData != null) {
+                            ffmpeg.encode(yuvData as ByteArray)
+                        }
+                        sendEncodeMessage()
+                    }
+                }
+            }
+        }
+        sendEncodeMessage()
     }
 
     /** 请求权限 */
@@ -255,7 +284,20 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
 
     /** 初始化编码器 */
     private fun initFFmpeg() {
-//        ffmpeg.init(previewTextureView.width, previewTextureView.height)
+        ffmpeg.init(previewTextureView.width, previewTextureView.height)
+    }
+
+    /** 发送解码数据 */
+    private fun sendEncodeMessage() {
+        val message = encodeHandler?.obtainMessage(MSG_WHAT_ENCODE)
+        var yuvData: ByteArray? = null
+        synchronized(dataList) {
+            if (dataList.size > 1) {
+                yuvData = dataList.removeAt(0)
+            }
+        }
+        message?.obj = yuvData
+        encodeHandler?.sendMessage(message)
     }
 
     /** 切换摄像头 */
@@ -327,6 +369,17 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
             Log.e(TAG, e.toString())
         }
 
+    }
+
+    private fun stopEncodeThread() {
+        encodeThread?.quitSafely()
+        try {
+            encodeThread?.join()
+            encodeThread = null
+            encodeHandler = null
+        } catch (e: Exception) {
+            Log.e(TAG, "exceptiom: = $e")
+        }
     }
 
     /** CameraDevice state listener */
@@ -404,10 +457,14 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
             }
             recordCaptureSession = session
             try {
+                /** 开启编码线程 */
+                startEncodeThread()
                 /** 自动对焦模式是continuous */
-                recordRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+//                recordRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                 /** 闪光灯自动模式 */
                 recordRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
+                /** 帧率 */
+                recordRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(16, 17))
                 /** 创建请求 */
                 recordRequest = recordRequestBuilder.build()
                 /** start preview */
@@ -426,7 +483,10 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
         override fun onClosed(session: CameraCaptureSession?) {
             Log.d(TAG, "recordCaptureSession closed")
             super.onClosed(session)
+            /** 停止编码线程 */
+            stopEncodeThread()
             if (!closing) {
+
                 createCameraPreviewSession()
             }
         }
@@ -440,18 +500,21 @@ class CaptureFragmentV2: Fragment(), ActivityCompat.OnRequestPermissionsResultCa
             val threadName = Thread.currentThread().name
             val image = reader?.acquireNextImage()
             if (image != null) {
-                val buffer = image.planes[0].buffer
-                val data = ByteArray(buffer.remaining())
+                var buffer = image.planes[0].buffer
+                var data = ByteArray(buffer.remaining())
                 buffer.get(data)
-                /** ffmpeg encode */
-//                ffmpeg.encode(data)
+                Log.d(TAG, "data size = ${data.size}")
+                synchronized(dataList) {
+                    dataList.add(data)
+                }
                 image.close()
             } else {
                 Log.d(TAG, "image is null")
             }
         }
-
     }
+
+
 
 
 }
